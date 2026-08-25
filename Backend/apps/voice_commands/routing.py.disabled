@@ -1,0 +1,6 @@
+from django.urls import re_path
+from .consumers import VoiceConsumer
+
+websocket_urlpatterns = [
+    re_path(r'ws/voice/(?P<project_id>[^/]+)/$', VoiceConsumer.as_asgi()),
+]

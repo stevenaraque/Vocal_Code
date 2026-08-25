@@ -1,0 +1,86 @@
+import json
+from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
+from rest_framework_simplejwt.tokens import AccessToken
+from django.contrib.auth import get_user_model
+from apps.projects.models import Project
+
+User = get_user_model()
+
+
+class VoiceConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.project_id = self.scope['url_route']['kwargs']['project_id']
+        query_string = self.scope['query_string'].decode()
+        token = None
+        for param in query_string.split('&'):
+            if param.startswith('token='):
+                token = param.split('=')[1]
+                break
+
+        if not token:
+            await self.close(code=4001)
+            return
+
+        try:
+            access_token = AccessToken(token)
+            user_id = access_token['user_id']
+            self.user = await self.get_user(user_id)
+            self.project = await self.get_project(self.project_id, self.user)
+            if not self.project:
+                await self.close(code=4003)
+                return
+        except Exception:
+            await self.close(code=4002)
+            return
+
+        self.group_name = f'project_{self.project_id}'
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        if hasattr(self, 'group_name'):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+            if data.get('type') == 'ping':
+                await self.send(text_data=json.dumps({'type': 'pong'}))
+        except Exception:
+            pass
+
+    async def send_correction(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'correction',
+            'code': event['code'],
+            'position': event.get('position'),
+        }))
+
+    async def send_execution_output(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'execution_output',
+            'data': event['data'],
+        }))
+
+    async def send_execution_complete(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'execution_complete',
+            'output': event['output'],
+            'error': event['error'],
+            'exit_code': event['exit_code'],
+        }))
+
+    @database_sync_to_async
+    def get_user(self, user_id):
+        try:
+            return User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return None
+
+    @database_sync_to_async
+    def get_project(self, project_id, user):
+        try:
+            return Project.objects.get(id=project_id, owner=user, is_active=True)
+        except Project.DoesNotExist:
+            return None
