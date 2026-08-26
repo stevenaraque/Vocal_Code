@@ -68,9 +68,11 @@ class ExecutionViewSet(viewsets.GenericViewSet):
             status='running',
         )
 
-        transaction.on_commit(lambda: self._execute_async(log.id, code, language))
+        # Ejecución síncrona (sin Celery/Redis) - bloquea hasta 10s máx
+        self._execute_async(log.id, code, language)
+        log.refresh_from_db()
 
-        return Response(ExecutionLogSerializer(log).data, status=status.HTTP_202_ACCEPTED)
+        return Response(ExecutionLogSerializer(log).data, status=status.HTTP_200_OK)
 
     def _check_security(self, code, language):
         if language == 'python':

@@ -4,7 +4,6 @@ import CodeMirror from '@uiw/react-codemirror'
 import { python } from '@codemirror/lang-python'
 import { javascript } from '@codemirror/lang-javascript'
 import { cpp } from '@codemirror/lang-cpp'
-import { basicSetup } from 'codemirror'
 import { useProjects } from '../context/ProjectContext'
 import { useAuth } from '../context/AuthContext'
 
@@ -52,11 +51,16 @@ export default function Editor() {
   const [transcript, setTranscript] = useState('')
   const [showCommands, setShowCommands] = useState(false)
   const [recognition, setRecognition] = useState(null)
+  const [executionOutput, setExecutionOutput] = useState(null)
   const editorRef = useRef(null)
   const wsRef = useRef(null)
 
   useEffect(() => {
-    if (currentProject?.id !== id) {
+    if (!id || id === 'undefined') {
+      navigate('/')
+      return
+    }
+    if (String(currentProject?.id) !== String(id)) {
       api.get(`/projects/${id}/`).then(res => {
         setCurrentProject(res.data)
         setCode(res.data.code)
@@ -177,7 +181,7 @@ export default function Editor() {
   const saveCode = async () => {
     if (!currentProject) return
     try {
-      await updateProject(api, currentProject.id, { code })
+      await updateProject(currentProject.id, { code })
       console.log('Guardado')
     } catch (e) { console.error(e) }
   }
@@ -186,15 +190,20 @@ export default function Editor() {
     if (!currentProject) return
     try {
       const res = await api.post('/execute/', { project_id: currentProject.id, code, language })
+      setExecutionOutput(res.data)
       console.log('Ejecutando:', res.data)
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      const data = e.response?.data
+      setExecutionOutput(data || { error: e.message, status: 'error' })
+      console.error(e)
+    }
   }
 
   const handleChange = useCallback((value, viewUpdate) => {
     setCode(value)
   }, [])
 
-  const extensions = [basicSetup, LANG_EXTENSIONS[language]]
+  const extensions = [LANG_EXTENSIONS[language]]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -295,6 +304,24 @@ export default function Editor() {
             fontSize: '0.9rem',
           }}>
             🎙 {transcript.slice(-200)}
+          </div>
+        )}
+
+        {executionOutput && (
+          <div style={{
+            padding: '0.75rem 1rem',
+            background: '#0a0a0a',
+            borderTop: '1px solid var(--border)',
+            fontFamily: 'monospace',
+            fontSize: '0.85rem',
+            maxHeight: '200px',
+            overflow: 'auto',
+          }}>
+            <div style={{ color: executionOutput.status === 'success' ? 'var(--accent)' : 'var(--danger)', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+              ● {executionOutput.status} {executionOutput.duration_ms ? `(${executionOutput.duration_ms}ms)` : ''} {executionOutput.exit_code !== null ? `[exit ${executionOutput.exit_code}]` : ''}
+            </div>
+            {executionOutput.output && <pre style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap', margin: 0 }}>{executionOutput.output}</pre>}
+            {executionOutput.error && <pre style={{ color: '#ff6b6b', whiteSpace: 'pre-wrap', margin: 0 }}>{executionOutput.error}</pre>}
           </div>
         )}
       </div>
